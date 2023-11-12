@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        svg {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+        }
+
+        line {
+            stroke-width: .3;
+        }
+
+        text {
+            font-family: sans-serif;
+            font-size: xx-small;
+        }
+
+        .inActive {
+            fill: rgb(216, 214, 214);
+        }
+
+        #sidePanel {
+            position: absolute;
+            top: 250px;
+            left: 1200px;
+            width: 200px;
+            height: 100%;
+            overflow: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="AuthorId"></div>
+    <div>
+        <h1 style="text-align: center;">Major Assignment 3</h1>
+        <h3 style="text-align: center;">Sneha Holehonnur Sridhar</h3>
+        <h3 style="text-align: center;">Student Id : 02130456</h3>
+    </div>
+    <div>
+        <h3>Alter the node size by :</h3>
+        <label>
+            <input type="radio" name="nodeSize" value="degree" checked> Degree
+        </label>
+        <label>
+            <input type="radio" name="nodeSize" value="publications"> Number of Publications
+        </label>
+        <label>
+            <input type="radio" name="nodeSize" value="citations"> Number of Citations
+        </label>
+        
+    </div>
+    <h5 style="text-align: center;">Click on the node to find author details</h5>
+    <div id="sidePanel">
+    </div>
+    <script>
+
+        const width = 1500
+        const height = 4200
+        let svg = d3.select("body").append("svg")
+            .attr("viewBox", `0 0 ${width} ${height}`);
+
+        d3.json("publication_network.json").then(data => {
+
+            // console.log(data.links)
+            let node_degree = {};
+
+            d3.map(data.links, function (d) {
+                // console.log(data.links)
+                if (node_degree.hasOwnProperty(d.source)) {
+                    node_degree[d.source]++
+                }
+                else {
+                    node_degree[d.source] = 0
+                }
+                if (node_degree.hasOwnProperty(d.target)) {
+                    node_degree[d.target]++
+                }
+                else {
+                    node_degree[d.target] = 0
+                }
+            })
+
+            const degreeExtent = d3.extent(Object.values(node_degree), d => d)
+            // console.log(degreeExtent)
+
+            let radiusScale = d3.scaleSqrt()
+                .domain([0, d3.max(data.nodes, d => d["Number of Publications"])])
+                .range([5, 15]);
+
+            // console.log(node_degree)
+            // console.log(data.nodes.map(d => d.id));
+            // console.log(data.links);
+
+            const uniqueCountries = Array.from(new Set(data.nodes.map(node => node.Country)));
+
+            const dynamicColorScale = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, uniqueCountries.length))
+                .domain(uniqueCountries);
+
+            let gCanvas = svg.append("g").attr("class", "canvas");
+
+            let gLinks = gCanvas.selectAll('.links')
+                .data(data.links)
+                .enter()
+                .append("line")
+                .attr("stroke", "black")
+
+            let gNodes = gCanvas.selectAll()
+                .data(data.nodes)
+                .enter()
+                .append('g');
+            let circles = gNodes.append('circle')
+                .attr("r", (d) => radiusScale(node_degree[d.id]))
+                .attr("fill", d => dynamicColorScale(d.Country))
+                .attr("class", d => "g_" + d.Country.replace(/\s+/g, "_"))
+            gNodes.on("mouseenter", (m, d) => {
+                d3.selectAll("circle").classed("inActive", true)
+                d3.selectAll(".g_" + d.Country.replace(/\s+/g, "_")).classed("inActive", false)
+            })
+            gNodes.on("mouseleave", (m, d) => {
+                d3.selectAll("circle").classed("inActive", false)
+            })
+            gNodes.on("click", (event, d) => {
+                console.log("Node clicked:", d);
+                updateSidePanel(d);
+            });
+
+            gNodes.append("text")
+                .text(d => d.Name)
+                .attr("text-anchor", "middle")
+                .attr("dy", (d) => {
+                    const radius = radiusScale(node_degree[d.id]);
+                    const dyVal = isNaN(radius) ? 0 : -radius - 2;
+                    return dyVal
+                })
+
+            //Adjust link length
+            let fSim = d3.forceSimulation(data.nodes)
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force("links", d3.forceLink(data.links).id(d => d.id).distance(50).strength(.2))
+                .force("collide", d3.forceCollide().radius((d) => radiusScale(node_degree[d.id]) * 1.5).iterations(5))
+                .force("charge", d3.forceManyBody().strength(-10))
+                .force("x", d3.forceX().strength(-0.001))
+                .force("y", d3.forceY().strength(-0.001))
+                .on('tick', update);
+
+            let currentMetric = "publications"; // Default metric
+
+            // Function to update node size based on the selected radio button
+            d3.selectAll("input[name='nodeSize']").on("change", function () {
+                let selectedValue = this.value;
+                currentMetric = selectedValue; // Update the current metric
+
+                circles.transition().duration(1000).attr("r", d => {
+                    if (selectedValue === "publications") {
+                        return radiusScale(d["Number of Publications"]);
+                    } else if (selectedValue === "citations") {
+                        return radiusScale(d["Number of Citations"]);
+                    } else if (selectedValue === "degree") {
+                        return radiusScale(node_degree[d.id]);
+                    }
+                });
+
+                // Update the collision force with the new radius based on the selected metric
+                fSim.force("collide", d3.forceCollide().radius(d => {
+                    if (currentMetric === "publications") {
+                        return radiusScale(d["Number of Publications"]) + 2;
+                    } else if (currentMetric === "citations") {
+                        return radiusScale(d["Number of Citations"]) + 2;
+                    } else if (currentMetric === "degree") {
+                        return radiusScale(node_degree[d.id]) + 2;
+                    }
+                }).iterations(5));
+            });
+
+
+            // Update HTML elements in the side panel based on authorDetails
+            function updateSidePanel(authorDetails) {
+                document.getElementById('sidePanel').innerHTML = `
+                <h3>${authorDetails.Name}</h3>
+                <p><strong>Author ID:</strong> ${authorDetails["id"]}</p>
+                <p><strong>Country:</strong> ${authorDetails.Country}</p>
+                <p><strong>Number of Publications:</strong> ${authorDetails["Number of Publications"]}</p>
+                <p><strong>Number of Citations:</strong> ${authorDetails["Number of Citations"]}</p>`;
+            }
+
+            function update() {
+
+                gNodes.attr("transform", d => `translate(${d.x},${d.y})`);
+
+                gLinks.attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+            }
+
+            svg.call(d3.zoom()
+                .extent([[0, 0], [width, height]])
+                .scaleExtent([1, 8])
+                .on("zoom", ({ transform }) => {
+                    gCanvas.attr("transform", transform)
+                }))
+        });
+
+
+    </script>
+</body>
+
+</html>
